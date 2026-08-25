@@ -20,12 +20,17 @@ The voice half is next.
 
 | Piece | State |
 | --- | --- |
-| Leak detection over charges and mailbox signals | ✅ implemented, 25 tests |
-| TCPA line boundary (who may be called) | ✅ implemented, 13 tests |
-| Mandate engine (what may be agreed to) | ✅ implemented, 17 tests |
+| Leak detection over charges and mailbox signals | ✅ implemented |
+| Statement ingestion, with vendor normalization | ✅ implemented |
+| TCPA line boundary (who may be called) | ✅ implemented |
+| Mandate engine (what may be agreed to) | ✅ implemented |
+| Mock retention line (demo counterparty and test harness) | ✅ implemented |
+| Mailbox ingestion | 🔧 next |
 | Nova Sonic caller agent | 🔧 next |
 | Amazon Connect telephony | ⛔ blocked on AWS account |
 | Certified letter escalation | 🔧 next |
+
+85 tests passing.
 
 ## How it works
 
@@ -94,6 +99,19 @@ The agent also always says what it is. That is not decoration: `disclose_ai=Fals
 Detection proposes and never acts. Every leak carries the message ids it came from and an honest
 confidence, and the duplicate detector says 0.55 because it genuinely does not know which of your
 two cloud plans you want to keep.
+
+## The counterparty fights back
+
+`dial/mock_retention.py` is a scripted retention desk: an IVR that only responds to digits, a
+hold queue, an agent who verifies you, and then the save ladder, in the order a real desk uses
+it. Discount, then freeze, then downgrade, then the line about losing your founding member rate
+forever, then the offer to have someone call you back.
+
+It is the demo's counterparty, so the video is repeatable and nobody is recorded without
+consenting. It is also the harness that proves the mandate holds, because the only honest way to
+test "the agent does not accept the pause offer" is to have something offer the pause. A full
+call, every save refused, driven entirely by the mandate gate, runs in the test suite with no
+AWS, no model, and no phone.
 
 ## Run the tests
 
