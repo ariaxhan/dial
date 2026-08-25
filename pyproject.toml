@@ -12,7 +12,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-voice = ["strands-agents[bidi]"]
+# aws-sdk-bedrock-runtime is pinned exactly. strands-agents 1.53.0 declares >=0.4.0,<1.0.0
+# but imports BedrockRuntimeClient, which 0.10.0 dropped and 0.11.0 renamed to
+# AsyncBedrockRuntimeClient. Both current releases therefore fail at import. 0.9.0 is the
+# newest that works. Verified 2026-08-24; recheck when bumping strands.
+voice = [
+    "strands-agents[bidi]>=1.53.0",
+    "aws-sdk-bedrock-runtime==0.9.0",
+]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [build-system]
