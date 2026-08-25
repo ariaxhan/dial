@@ -31,11 +31,12 @@ The voice half is next.
 | Mailbox connector (Gmail, read only) | ✅ implemented |
 | Nova Sonic voice, proven with a real audio round trip | ✅ verified on AWS |
 | Voice preflight, with a negative control | ✅ implemented |
-| Nova Sonic brain behind the `Brain` protocol | 🔧 next |
-| Amazon Connect telephony | 🔧 next |
+| Commitment gate (what may be *committed*, not said) | ✅ implemented |
+| Post-call audit against the mandate | ✅ implemented |
+| Amazon Connect instance, number, Lex bot | 🔧 next, needs AWS resources |
 | Certified letter escalation | 🔧 next |
 
-138 tests passing.
+158 tests passing.
 
 ```bash
 .venv/bin/python scripts/demo.py     # statement in, confirmation number out, offline
@@ -137,6 +138,31 @@ history past 200KB, so anything needed later is written down as it happens.
 
 **Every call has a wall-clock deadline.** Misconfigured credentials on Nova Sonic do not raise,
 they hang, and a call with no deadline is a call that runs forever on a live line.
+
+## When the loop is not ours
+
+Dial runs on Amazon Connect, where a Lex bot with a Nova Sonic voice drives the conversation
+and reaches our logic through tool calls. A tool is something the model *chooses* to invoke,
+and a model can choose not to. Naively that turns the mandate from a structural guarantee into
+a strongly worded suggestion, which is the whole product.
+
+So the design stops trying to control what the agent says and controls what it can commit.
+
+**Talking is free. Committing is gated.** A cancellation is only real when it produces a
+receipt; only `CommitmentLedger.commit()` issues receipts; and it consults the mandate. An
+agent that skips the tool ends the call having achieved nothing recordable. A cancellation
+without a confirmation number is refused outright, because "the agent said it was done" is not
+evidence and vendors reverse these.
+
+**Every transcript is replayed afterwards.** `dial/audit.py` reads the call back against the
+mandate and flags any gap between what was said and what was committed. A verbal yes to an
+unauthorised three month freeze produces `NEEDS_REVOCATION` with the quote and an instruction
+to send written revocation today.
+
+The honest claim is therefore not that the model cannot misspeak. It is:
+
+1. A misspoken acceptance cannot become a committed outcome.
+2. A misspoken acceptance is detected after the call, not discovered on a bill.
 
 ## Honest numbers
 
