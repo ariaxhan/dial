@@ -100,6 +100,9 @@ def normalize_vendor(descriptor: str) -> str:
     # "purchase authorized on 03/14 anytime fitness" leaves a date behind.
     text = re.sub(r"^\d{1,2}/\d{1,2}(/\d{2,4})?\s+", "", text).strip()
 
+    # Processors glue the product onto the merchant with a star: "GOOGLE *ONE".
+    text = " ".join(text.replace("*", " ").split())
+
     previous = None
     while previous != text:
         previous = text
@@ -110,9 +113,68 @@ def normalize_vendor(descriptor: str) -> str:
     if not text:
         return ""
 
-    # Title case, but leave acronyms that were already fully upper and short.
-    words = [w if (w.isupper() and len(w) <= 4) else w.capitalize() for w in text.split()]
-    return " ".join(words)
+    # Title case. A short all-caps word is almost never an acronym on a statement, it is
+    # just the descriptor shouting, so only a real allowlist survives uppercase.
+    words = []
+    for word in text.split():
+        stripped = word.strip(".,")
+        if stripped.upper() in _ACRONYMS:
+            words.append(stripped.upper())
+        else:
+            words.append(stripped.capitalize())
+    text = " ".join(w for w in words if w)
+
+    return _canonicalize(text)
+
+
+#: The only words that stay uppercase.
+_ACRONYMS = frozenset({"AT&T", "ADT", "AAA", "IRS", "DMV", "USPS", "UPS", "IBM", "AWS",
+                       "NYT", "WSJ", "HBO", "AMC", "CVS", "BP", "T-MOBILE"})
+
+#: Generic tails that carry no identity. "Calm.com Subscription" is Calm.
+_GENERIC_TAILS = (
+    "subscription", "subscriptions", "recurring", "membership", "autopay",
+    "bill pay", "billpay", "payment", "payments", "monthly", "annual",
+)
+
+
+def _canonicalize(text: str) -> str:
+    """Snap a cleaned descriptor onto a known vendor when one clearly matches.
+
+    Statements truncate ("ANYTIME FIT"), pad ("COMCAST CABLE COMM"), and decorate
+    ("NETFLIX.COM"). All three are the same company, and a detector that sees three
+    vendors sees no cadence at all.
+    """
+    working = text
+    lowered = working.lower()
+
+    for tail in _GENERIC_TAILS:
+        if lowered.endswith(" " + tail):
+            working = working[: -(len(tail) + 1)].strip()
+            lowered = working.lower()
+
+    # Drop a .com style suffix on the final word: "Netflix.com" is Netflix.
+    working = re.sub(r"\.(com|net|org|io|co)\b", "", working, flags=re.I).strip()
+    lowered = working.lower()
+    if not lowered:
+        return text
+
+    for known in _CATEGORIES:
+        # Exact, contains, or a truncation of a known vendor.
+        if lowered == known:
+            return _title(known)
+        if known in lowered:
+            return _title(known)
+        if len(lowered) >= 6 and known.startswith(lowered):
+            return _title(known)
+
+    return working
+
+
+def _title(name: str) -> str:
+    return " ".join(
+        w.upper() if w.upper() in _ACRONYMS else w.capitalize() for w in name.split()
+    )
 
 
 def guess_category(vendor: str) -> str | None:

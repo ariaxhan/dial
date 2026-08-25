@@ -25,12 +25,18 @@ The voice half is next.
 | TCPA line boundary (who may be called) | ✅ implemented |
 | Mandate engine (what may be agreed to) | ✅ implemented |
 | Mock retention line (demo counterparty and test harness) | ✅ implemented |
-| Mailbox ingestion | 🔧 next |
-| Nova Sonic caller agent | 🔧 next |
+| Call loop, with the hold gate and outcomes | ✅ implemented |
+| Mailbox signal ingestion | ✅ implemented |
+| End to end demo, statement to confirmation number | ✅ `scripts/demo.py` |
+| Nova Sonic brain (same `Brain` protocol) | 🔧 next |
 | Amazon Connect telephony | ⛔ blocked on AWS account |
 | Certified letter escalation | 🔧 next |
 
-85 tests passing.
+107 tests passing.
+
+```bash
+.venv/bin/python scripts/demo.py     # statement in, confirmation number out, offline
+```
 
 ## How it works
 
@@ -112,6 +118,32 @@ consenting. It is also the harness that proves the mandate holds, because the on
 test "the agent does not accept the pause offer" is to have something offer the pause. A full
 call, every save refused, driven entirely by the mandate gate, runs in the test suite with no
 AWS, no model, and no phone.
+
+## What the loop refuses to get wrong
+
+Three decisions came out of the failure research and are worth naming, because each one is
+invisible when it goes wrong.
+
+**The model is never consulted while on hold.** A speech-to-speech model pointed at fifteen
+minutes of hold music will narrate it, burn the conversation history cap, and produce nothing.
+Hold is detected and the brain is gated off until a human is actually there. A test asserts the
+brain never received a single utterance of hold music.
+
+**The transcript belongs to the loop, not the model.** Nova Sonic silently truncates its own
+history past 200KB, so anything needed later is written down as it happens.
+
+**Every call has a wall-clock deadline.** Misconfigured credentials on Nova Sonic do not raise,
+they hang, and a call with no deadline is a call that runs forever on a live line.
+
+## Honest numbers
+
+The detector will not claim more than its evidence supports. A bank statement cannot show
+whether you use Netflix, so with no usage evidence the detector never calls anything a zombie
+service, rather than accusing everything you pay for. One vendor is counted once in the total,
+because a price rise and an unused service on the same account is one problem described twice.
+A one-off double charge is reported once, not multiplied by twelve.
+
+Those three rules took the demo's headline from a nonsense $7,728 a year down to $1,696.
 
 ## Run the tests
 

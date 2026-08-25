@@ -206,7 +206,10 @@ class TestReporting:
     def test_annual_cost_can_count_only_what_a_human_approved(self) -> None:
         charges = monthly("Anytime Fitness", 49.00, 7, category="gym",
                           start=dt.date(2026, 1, 5))
-        leaks = detect(charges, [], today=TODAY)
+        signals = [
+            Signal("Anytime Fitness", SignalKind.ENGAGEMENT, dt.date(2026, 1, 20), "e1")
+        ]
+        leaks = detect(charges, signals, today=TODAY)
         assert annual_cost(leaks) > 0
         assert annual_cost(leaks, approved_only=True) == 0.0
 
@@ -219,7 +222,10 @@ class TestRealWorldCadence:
             Charge("Anytime Fitness", 49.00, dt.date(2026, m, 5), f"g{m}", "gym")
             for m in (1, 2, 3, 4, 5, 6, 7, 8)
         ]
-        leaks = detect(charges, [], today=TODAY)
+        signals = [
+            Signal("Anytime Fitness", SignalKind.ENGAGEMENT, dt.date(2026, 1, 20), "e1")
+        ]
+        leaks = detect(charges, signals, today=TODAY)
         assert any(leak.kind is LeakKind.ZOMBIE_SERVICE for leak in leaks), (
             "February makes the gaps uneven; the detector must survive that"
         )
@@ -235,3 +241,43 @@ class TestRealWorldCadence:
                  if leak.kind is LeakKind.SILENT_PRICE_RISE]
         assert len(rises) == 1
         assert rises[0].monthly_usd == 7.4  # $90 a year, expressed monthly
+
+
+class TestHonestClaims:
+    """The detector must not claim more than its evidence supports."""
+
+    def test_without_usage_evidence_it_never_claims_a_service_is_unused(self) -> None:
+        """A statement alone cannot show whether you use Netflix."""
+        charges = monthly("Netflix", 15.49, 8, category="streaming")
+        leaks = detect(charges, [], today=TODAY)
+        assert not any(leak.kind is LeakKind.ZOMBIE_SERVICE for leak in leaks)
+
+    def test_with_usage_evidence_it_will_make_the_claim(self) -> None:
+        charges = monthly("Netflix", 15.49, 8, category="streaming")
+        signals = [Signal("Spotify", SignalKind.ENGAGEMENT, dt.date(2026, 8, 1), "e1")]
+        leaks = detect(charges, signals, today=TODAY)
+        assert any(leak.kind is LeakKind.ZOMBIE_SERVICE for leak in leaks)
+
+    def test_a_double_charge_is_not_annualised(self) -> None:
+        charges = [
+            Charge("Delta", 412.30, dt.date(2026, 8, 4), "d1"),
+            Charge("Delta", 412.30, dt.date(2026, 8, 4), "d2"),
+        ]
+        leak = detect(charges, [], today=TODAY)[0]
+        assert leak.annual_usd == 0.0
+        assert leak.one_time_usd == 412.30
+        assert leak.impact_usd == 412.30
+
+    def test_one_vendor_is_not_counted_twice_in_the_total(self) -> None:
+        """Comcast as both a price rise and a zombie is one problem, described twice."""
+        charges = monthly("Comcast", 89.99, 4, category="cable")
+        charges += [
+            Charge("Comcast", 129.99, dt.date(2026, 6, 2), "c4", "cable"),
+            Charge("Comcast", 129.99, dt.date(2026, 7, 2), "c5", "cable"),
+        ]
+        signals = [Signal("Spotify", SignalKind.ENGAGEMENT, dt.date(2026, 8, 1), "e1")]
+        leaks = detect(charges, signals, today=TODAY)
+        comcast = [leak for leak in leaks if leak.vendor == "Comcast"]
+        assert len(comcast) == 1, "the vaguer finding must be suppressed"
+        assert comcast[0].kind is LeakKind.SILENT_PRICE_RISE
+        assert annual_cost(leaks) == comcast[0].annual_usd

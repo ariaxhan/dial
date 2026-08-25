@@ -96,10 +96,24 @@ class Leak:
     evidence: tuple[str, ...]
     route: Route = Route.PHONE_REQUIRED
     approved: bool = False
+    #: A one-off amount. A double charge costs what it costs, once. Annualising it would
+    #: turn a $412 mistake into a $4,947 headline, which is the kind of number that gets a
+    #: demo laughed at.
+    one_time_usd: float = 0.0
 
     @property
     def annual_usd(self) -> float:
+        """The recurring cost over a year. Zero for one-off leaks."""
         return round(self.monthly_usd * 12, 2)
+
+    @property
+    def impact_usd(self) -> float:
+        """What stopping this is worth: a year of the recurring part, plus any one-off."""
+        return round(self.annual_usd + self.one_time_usd, 2)
+
+    @property
+    def is_recurring(self) -> bool:
+        return self.monthly_usd > 0
 
 
 #: Vendor categories where cancellation is, in practice, gated behind a human on a phone.
@@ -205,6 +219,12 @@ def detect(
     for s in signals:
         sig_by_vendor[s.vendor].append(s)
 
+    # "No sign of use" is only a finding if use was something we could have seen. With no
+    # engagement signals anywhere, every subscription looks abandoned and the detector
+    # would confidently accuse a service the person uses daily. Statements alone cannot
+    # support this claim, so it is not made.
+    can_see_usage = any(s.kind is SignalKind.ENGAGEMENT for s in signals)
+
     found += _double_charges(by_vendor)
     found += _missing_refunds(credits, sig_by_vendor, today)
 
@@ -225,14 +245,50 @@ def detect(
         if trial:
             found.append(trial)
 
-        zombie = _zombie(vendor, ordered, cadence, sig_by_vendor[vendor], category, today)
-        if zombie:
-            found.append(zombie)
+        if can_see_usage:
+            zombie = _zombie(
+                vendor, ordered, cadence, sig_by_vendor[vendor], category, today
+            )
+            if zombie:
+                found.append(zombie)
 
     found += _duplicates(by_vendor)
 
-    # Highest annual cost first: that is the order a human wants to approve in.
-    return sorted(found, key=lambda leak: leak.annual_usd, reverse=True)
+    found = _suppress_redundant(found)
+    # Highest impact first: that is the order a human wants to approve in.
+    return sorted(found, key=lambda leak: leak.impact_usd, reverse=True)
+
+
+#: When several leaks describe the same vendor, the more specific finding is the useful
+#: one. A silent price rise tells you what to argue about; "you do not seem to use this"
+#: does not.
+_SPECIFICITY: dict[LeakKind, int] = {
+    LeakKind.DOUBLE_CHARGE: 5,
+    LeakKind.REFUND_NEVER_ISSUED: 5,
+    LeakKind.SILENT_PRICE_RISE: 4,
+    LeakKind.CONVERTED_TRIAL: 3,
+    LeakKind.DUPLICATE_SERVICE: 2,
+    LeakKind.ZOMBIE_SERVICE: 1,
+    LeakKind.AUTO_RENEWAL: 1,
+}
+
+
+def _suppress_redundant(found: list[Leak]) -> list[Leak]:
+    """Drop the vaguer of two recurring findings about the same vendor.
+
+    Reporting Comcast as both a price rise and a zombie is not two problems, it is one
+    problem described twice, and it doubles the headline number.
+    """
+    best: dict[str, Leak] = {}
+    passthrough: list[Leak] = []
+    for leak in found:
+        if not leak.is_recurring:
+            passthrough.append(leak)      # one-off findings stand on their own
+            continue
+        current = best.get(leak.vendor)
+        if current is None or _SPECIFICITY[leak.kind] > _SPECIFICITY[current.kind]:
+            best[leak.vendor] = leak
+    return passthrough + list(best.values())
 
 
 def _price_rise(
@@ -329,7 +385,8 @@ def _double_charges(by_vendor: dict[str, list[Charge]]) -> list[Leak]:
                     Leak(
                         kind=LeakKind.DOUBLE_CHARGE,
                         vendor=vendor,
-                        monthly_usd=round(c.amount_usd, 2),
+                        monthly_usd=0.0,
+                        one_time_usd=round(c.amount_usd, 2),
                         confidence=0.95,
                         rationale=(
                             f"two charges of ${c.amount_usd:.2f} from {vendor} "
@@ -366,6 +423,7 @@ def _missing_refunds(
                     kind=LeakKind.REFUND_NEVER_ISSUED,
                     vendor=vendor,
                     monthly_usd=0.0,
+                    one_time_usd=0.0,
                     confidence=0.7,
                     rationale=(
                         f"return to {vendor} confirmed {s.date.isoformat()}, "
@@ -415,6 +473,21 @@ def _duplicates(by_vendor: dict[str, list[Charge]]) -> list[Leak]:
 
 
 def annual_cost(leaks: list[Leak], *, approved_only: bool = False) -> float:
-    """Total annual bleed across leaks. The number that goes in the pitch."""
+    """Total bleed across leaks. The number that goes in the pitch, so it has to be honest.
+
+    Counts each vendor once. Two findings about one vendor are one problem described twice,
+    and summing them naively is how a demo ends up claiming a household leaks more than it
+    spends. One-off leaks are added at face value rather than annualised.
+    """
     considered = [leak for leak in leaks if leak.approved] if approved_only else leaks
-    return round(sum(leak.annual_usd for leak in considered), 2)
+
+    recurring_by_vendor: dict[str, float] = {}
+    one_offs = 0.0
+    for leak in considered:
+        if leak.is_recurring:
+            recurring_by_vendor[leak.vendor] = max(
+                recurring_by_vendor.get(leak.vendor, 0.0), leak.annual_usd
+            )
+        else:
+            one_offs += leak.one_time_usd
+    return round(sum(recurring_by_vendor.values()) + one_offs, 2)
