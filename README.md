@@ -28,11 +28,14 @@ The voice half is next.
 | Call loop, with the hold gate and outcomes | ✅ implemented |
 | Mailbox signal ingestion | ✅ implemented |
 | End to end demo, statement to confirmation number | ✅ `scripts/demo.py` |
-| Nova Sonic brain (same `Brain` protocol) | 🔧 next |
-| Amazon Connect telephony | ⛔ blocked on AWS account |
+| Mailbox connector (Gmail, read only) | ✅ implemented |
+| Nova Sonic voice, proven with a real audio round trip | ✅ verified on AWS |
+| Voice preflight, with a negative control | ✅ implemented |
+| Nova Sonic brain behind the `Brain` protocol | 🔧 next |
+| Amazon Connect telephony | 🔧 next |
 | Certified letter escalation | 🔧 next |
 
-107 tests passing.
+138 tests passing.
 
 ```bash
 .venv/bin/python scripts/demo.py     # statement in, confirmation number out, offline
@@ -144,6 +147,22 @@ because a price rise and an unused service on the same account is one problem de
 A one-off double charge is reported once, not multiplied by twelve.
 
 Those three rules took the demo's headline from a nonsense $7,728 a year down to $1,696.
+
+## The preflight, and why it is not a health check
+
+`BidiAgent.start()` reports success for a model id that does not exist. It never contacts AWS.
+So "the session opened" is not evidence, and a misconfigured Nova Sonic shows up as silence on
+a live call rather than an exception.
+
+Measured in us-west-2 on 2026-08-24:
+
+| Model id | `start()` | Real audio round trip |
+| --- | --- | --- |
+| `amazon.nova-2-sonic-v1:0` | STARTED | 3 chunks, 10,204 bytes, 2.08s |
+| `amazon.nova-2-sonic-DOES-NOT-EXIST:0` | STARTED | nothing, 45s timeout |
+
+Only the right-hand column discriminates, so `dial/preflight.py` sends genuine 16 kHz mono
+speech and requires audio back before any number is dialed.
 
 ## Run the tests
 
