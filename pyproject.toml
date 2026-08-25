@@ -1,0 +1,26 @@
+[project]
+name = "dial"
+version = "0.1.0"
+description = "Finds what is quietly costing you money, then makes the call you have been avoiding."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "strands-agents>=1.0.0",
+    "pydantic>=2.7",
+    "phonenumbers>=8.13",
+]
+
+[project.optional-dependencies]
+voice = ["strands-agents[bidi]"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dial"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
